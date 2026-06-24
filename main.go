@@ -6,11 +6,11 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"unsafe"
 
-	// <--- AGREGA ESTA LÍNEA
 	"JohaEdi/editor"
 	"JohaEdi/filesystem"
 
@@ -26,11 +26,10 @@ const (
 )
 
 var (
-	focoEditor = true
+	focoEditor = false // Iniciamos en el explorador para que puedas navegar de inmediato
 	indexArbol = 0
 )
 
-// Forzar a Windows a interpretar secuencias ANSI nativamente de forma correcta
 func activarAnsiWindows() {
 	modkernel32 := syscall.NewLazyDLL("kernel32.dll")
 	procSetConsoleMode := modkernel32.NewProc("SetConsoleMode")
@@ -39,21 +38,30 @@ func activarAnsiWindows() {
 	handle, _ := syscall.Open("CONOUT$", syscall.O_RDWR, 0)
 	var mode uint32
 
-	// Usamos unsafe.Pointer de forma nativa como lo exige la API de Go
 	procGetConsoleMode.Call(uintptr(handle), uintptr(unsafe.Pointer(&mode)))
 	mode |= 0x0004 // ENABLE_VIRTUAL_TERMINAL_PROCESSING
 	procSetConsoleMode.Call(uintptr(handle), uintptr(mode))
 }
-func unsafePointer(v *uint32) uintptr {
-	return uintptr(uintptr(unsafePointerRaw(v)))
-}
 
-func unsafePointerRaw(v *uint32) *uint32 {
-	return v
+func filtrarNodosInternos(nodo *filesystem.ArchivoNodo) *filesystem.ArchivoNodo {
+	if nodo == nil {
+		return nil
+	}
+	var nuevosHijos []*filesystem.ArchivoNodo
+	for _, hijo := range nodo.Hijos {
+		nombreLower := strings.ToLower(hijo.Nombre)
+		if nombreLower == "editor" || nombreLower == "filesystem" || nombreLower == "ui" ||
+			nombreLower == "go.mod" || nombreLower == "go.sum" || nombreLower == "main.go" ||
+			nombreLower == "johaedi.exe" || (len(hijo.Nombre) > 0 && hijo.Nombre[0] == '.') {
+			continue
+		}
+		nuevosHijos = append(nuevosHijos, filtrarNodosInternos(hijo))
+	}
+	nodo.Hijos = nuevosHijos
+	return nodo
 }
 
 func main() {
-	// Activar soporte ANSI en Windows de forma nativa antes de renderizar nada
 	activarAnsiWindows()
 
 	rutaArchivoInicial := ""
@@ -83,12 +91,16 @@ func main() {
 	fmt.Print(LimpiarPantalla)
 
 	buf := editor.NuevoBuffer(rutaArchivoInicial)
-	arbol, _ := filesystem.LeerDirectorio(".")
+	dirActual, _ := os.Getwd()
+	arbolRaw, _ := filesystem.LeerDirectorio(dirActual)
+	arbol := filtrarNodosInternos(arbolRaw)
 
-	ejecutarBucle(buf, arbol, oldState)
-}
+	// Ajustar índice inicial si el árbol tiene elementos
+	nodosPlanos := filesystem.ObtenerNodosPlanos(arbol)
+	if len(nodosPlanos) > 1 {
+		indexArbol = 1 // Saltamos la raíz "." por defecto
+	}
 
-func ejecutarBucle(buf *editor.BufferEditor, arbol *filesystem.ArchivoNodo, oldState *term.State) {
 	b := make([]byte, 3)
 	for {
 		ancho, alto, _ := term.GetSize(int(os.Stdout.Fd()))
@@ -101,19 +113,36 @@ func ejecutarBucle(buf *editor.BufferEditor, arbol *filesystem.ArchivoNodo, oldS
 
 		if n == 1 {
 			switch b[0] {
-			case 3: // Ctrl + C
-				buf.CopiarLinea()
-			case 19: // Ctrl + S
-				_ = buf.GuardarCambios()
-			case 17: // Ctrl + Q
-				return
-			case 9: // TAB
+			case 9: // TAB -> Alternar paneles
 				focoEditor = !focoEditor
+			case 19, 115: // Ctrl + S o letra 's' (Si está en modo comando) para Guardar
+				if b[0] == 19 || (focoEditor && b[0] == 115) {
+					_ = buf.GuardarCambios()
+					arbolRaw, _ = filesystem.LeerDirectorio(".")
+					arbol = filtrarNodosInternos(arbolRaw)
+				} else if !focoEditor && (b[0] == 115 || b[0] == 83) {
+					// Guardar normal desde el explorador si se presiona S
+					_ = buf.GuardarCambios()
+				}
+			case 17, 24: // Ctrl + Q o Ctrl + X -> Salir de forma segura
+				return
+			case 5: // Ctrl + E -> Ejecutar comandos de Terminal (Git, Go, etc.)
+				fmt.Print(MostrarCursor)
+				term.Restore(int(os.Stdin.Fd()), oldState)
+
+				ejecutarConsolaComandos(buf, alto)
+
+				oldState, _ = term.MakeRaw(int(os.Stdin.Fd()))
+				fmt.Print(OcultarCursor)
+				fmt.Print(LimpiarPantalla)
+
+				arbolRaw, _ = filesystem.LeerDirectorio(".")
+				arbol = filtrarNodosInternos(arbolRaw)
 			case 13: // ENTER
 				if focoEditor {
 					buf.InsertarSaltoLinea()
 				} else {
-					nodosPlanos := filesystem.ObtenerNodosPlanos(arbol)
+					nodosPlanos = filesystem.ObtenerNodosPlanos(arbol)
 					if indexArbol < len(nodosPlanos) && !nodosPlanos[indexArbol].EsDirectorio {
 						buf = editor.NuevoBuffer(nodosPlanos[indexArbol].Ruta)
 						focoEditor = true
@@ -124,41 +153,65 @@ func ejecutarBucle(buf *editor.BufferEditor, arbol *filesystem.ArchivoNodo, oldS
 				if focoEditor {
 					buf.BorrarCaracter()
 				}
-			case 5: // Ctrl + E -> Modo Comando
-				fmt.Print(MostrarCursor)
-				term.Restore(int(os.Stdin.Fd()), oldState)
-
-				ejecutarConsolaComandos(buf, alto)
-
-				oldState, _ = term.MakeRaw(int(os.Stdin.Fd()))
-				fmt.Print(OcultarCursor)
-				fmt.Print(LimpiarPantalla)
-				arbol, _ = filesystem.LeerDirectorio(".")
+			case 114, 82: // Tecla 'R' o 'r' -> Crear Archivo (Solo si el foco está en el Explorador)
+				if !focoEditor {
+					term.Restore(int(os.Stdin.Fd()), oldState)
+					fmt.Printf("\033[%d;1H\033[KCrear archivo: ", alto)
+					reader := bufio.NewReader(os.Stdin)
+					nombre, _ := reader.ReadString('\n')
+					nombre = strings.TrimSpace(nombre)
+					if nombre != "" {
+						_ = os.WriteFile(nombre, []byte(""), 0644)
+					}
+					oldState, _ = term.MakeRaw(int(os.Stdin.Fd()))
+					fmt.Print(LimpiarPantalla)
+					arbolRaw, _ = filesystem.LeerDirectorio(".")
+					arbol = filtrarNodosInternos(arbolRaw)
+				} else {
+					buf.InsertarCaracter(rune(b[0]))
+				}
+			case 116, 84: // Tecla 'T' o 't' -> Crear Carpeta (Solo si el foco está en el Explorador)
+				if !focoEditor {
+					term.Restore(int(os.Stdin.Fd()), oldState)
+					fmt.Printf("\033[%d;1H\033[KCrear carpeta: ", alto)
+					reader := bufio.NewReader(os.Stdin)
+					nombre, _ := reader.ReadString('\n')
+					nombre = strings.TrimSpace(nombre)
+					if nombre != "" {
+						_ = os.MkdirAll(nombre, 0755)
+					}
+					oldState, _ = term.MakeRaw(int(os.Stdin.Fd()))
+					fmt.Print(LimpiarPantalla)
+					arbolRaw, _ = filesystem.LeerDirectorio(".")
+					arbol = filtrarNodosInternos(arbolRaw)
+				} else {
+					buf.InsertarCaracter(rune(b[0]))
+				}
 			default:
 				if focoEditor && b[0] >= 32 && b[0] <= 126 {
 					buf.InsertarCaracter(rune(b[0]))
 				}
 			}
-		} else if n == 3 && b[0] == 27 && b[1] == 91 {
-			nodosPlanos := filesystem.ObtenerNodosPlanos(arbol)
+		} else if n == 3 && b[0] == 27 && b[1] == 91 { // Detección de Flechas Físicas
+			nodosPlanos = filesystem.ObtenerNodosPlanos(arbol)
 			switch b[2] {
-			case 65: // Arriba
+			case 65: // Flecha Arriba
 				if focoEditor {
 					buf.MoverArriba()
 				} else if indexArbol > 0 {
 					indexArbol--
 				}
-			case 66: // Abajo
+			case 66: // Flecha Abajo
 				if focoEditor {
 					buf.MoverAbajo()
 				} else if indexArbol < len(nodosPlanos)-1 {
 					indexArbol++
 				}
-			case 68: // Izquierda
+			case 68: // Flecha Izquierda
 				if focoEditor {
 					buf.MoverIzquierda()
 				}
-			case 67: // Derecha
+			case 67: // Flecha Derecha
 				if focoEditor {
 					buf.MoverDerecha()
 				}
@@ -168,10 +221,13 @@ func ejecutarBucle(buf *editor.BufferEditor, arbol *filesystem.ArchivoNodo, oldS
 }
 
 func renderizarPantalla(buf *editor.BufferEditor, arbol *filesystem.ArchivoNodo, ancho, alto int) {
-	fmt.Print("\033[H") // Redibujar estrictamente en la esquina superior izquierda (pantalla estática)
+	fmt.Print("\033[H")
 	fmt.Print(ColorVerde)
 
-	lineasArbol := filesystem.FormatearArbol(arbol, "")
+	var lineasArbol []string
+	if arbol != nil {
+		lineasArbol = filesystem.FormatearArbol(arbol, "")
+	}
 
 	logo := []string{
 		"██╗ ██████╗ ██╗  ██╗ █████╗ ███████╗██████╗ ██╗",
@@ -189,8 +245,11 @@ func renderizarPantalla(buf *editor.BufferEditor, arbol *filesystem.ArchivoNodo,
 		lineaInicioLogo = 0
 	}
 
+	tieneArchivosReales := len(lineasArbol) > 1
+	tieneTextoAbierto := !(len(buf.Lineas) == 1 && buf.Lineas[0] == "" && buf.RutaArchivo == "")
+
 	for i := 0; i < alto-1; i++ {
-		// --- PANEL IZQUIERDO (Lista limpia) ---
+		// --- PANEL IZQUIERDO ---
 		colIzquierda := ""
 		if i < len(lineasArbol) {
 			colIzquierda = lineasArbol[i]
@@ -206,7 +265,7 @@ func renderizarPantalla(buf *editor.BufferEditor, arbol *filesystem.ArchivoNodo,
 		fmt.Printf("%-25s   ", colIzquierda)
 
 		// --- PANEL CENTRAL ---
-		if len(buf.Lineas) == 1 && buf.Lineas[0] == "" && buf.RutaArchivo == "" {
+		if !tieneArchivosReales && !tieneTextoAbierto {
 			if i >= lineaInicioLogo && i < lineaInicioLogo+len(logo) {
 				fmt.Print(logo[i-lineaInicioLogo])
 			}
@@ -224,20 +283,25 @@ func renderizarPantalla(buf *editor.BufferEditor, arbol *filesystem.ArchivoNodo,
 				}
 			}
 		}
-		fmt.Print("\033[K\n") // Borrar residuos de la derecha de forma limpia sin saltos locos
+		fmt.Print("\033[K\n")
 	}
 
 	// --- BARRA INFERIOR ---
 	fmt.Printf("\033[%d;1H\033[K", alto)
-	seccionActual := "EDITOR"
-	if !focoEditor {
-		seccionActual = "EXPLORADOR"
+	seccionActual := "EXPLORADOR"
+	if focoEditor {
+		seccionActual = "EDITOR"
 	}
-	archivoActivo := buf.RutaArchivo
-	if archivoActivo == "" {
+	archivoActivo := filepath.Base(buf.RutaArchivo)
+	if buf.RutaArchivo == "" {
 		archivoActivo = "Ninguno"
 	}
-	fmt.Printf("[TAB] %s | Archivo: %s | [Ctrl+S] Guardar | [Ctrl+E] Terminal | [Ctrl+Q] Salir", seccionActual, archivoActivo)
+
+	if !focoEditor {
+		fmt.Printf("[TAB] %s | [R] Nuevo Archivo | [T] Nueva Carpeta | [Ctrl+E] Terminal | [Ctrl+Q] Salir", seccionActual)
+	} else {
+		fmt.Printf("[TAB] %s | Archivo: %s | [Ctrl+S] Guardar | [Ctrl+E] Terminal | [Ctrl+Q] Salir", seccionActual, archivoActivo)
+	}
 }
 
 func ejecutarConsolaComandos(buf *editor.BufferEditor, alto int) {
@@ -252,18 +316,9 @@ func ejecutarConsolaComandos(buf *editor.BufferEditor, alto int) {
 		return
 	}
 
-	partes := strings.Fields(comandoInput)
-	comandoPrincipal := partes[0]
-
 	fmt.Print(LimpiarPantalla + "\033[H")
 
-	var cmd *exec.Cmd
-	if len(partes) > 1 {
-		cmd = exec.Command("cmd", "/c", comandoPrincipal, strings.Join(partes[1:], " "))
-	} else {
-		cmd = exec.Command("cmd", "/c", comandoPrincipal)
-	}
-
+	cmd := exec.Command("cmd", "/c", comandoInput)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
