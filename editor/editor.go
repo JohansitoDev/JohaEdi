@@ -21,7 +21,7 @@ func NuevoBuffer(ruta string) *BufferEditor {
 	if ruta != "" {
 		contenido, err := os.ReadFile(ruta)
 		if err == nil {
-			// Normalizar saltos de línea de Windows (\r\n) a (\n)
+
 			texto := strings.ReplaceAll(string(contenido), "\r\n", "\n")
 			b.Lineas = strings.Split(texto, "\n")
 		}
@@ -50,7 +50,6 @@ func (b *BufferEditor) InsertarCaracter(r rune) {
 	b.CursorX++
 }
 
-// Nueva línea al presionar Enter
 func (b *BufferEditor) InsertarSaltoLinea() {
 	lineaActual := b.Lineas[b.CursorY]
 	textoAntesCursor := lineaActual[:b.CursorX]
@@ -58,7 +57,6 @@ func (b *BufferEditor) InsertarSaltoLinea() {
 
 	b.Lineas[b.CursorY] = textoAntesCursor
 
-	// Insertar la nueva línea justo abajo
 	b.Lineas = append(b.Lineas[:b.CursorY+1], append([]string{textoDespuesCursor}, b.Lineas[b.CursorY+1:]...)...)
 	b.CursorY++
 	b.CursorX = 0
@@ -71,7 +69,7 @@ func (b *BufferEditor) BorrarCaracter() {
 		b.Lineas[b.CursorY] = linea[:b.CursorX-1] + linea[b.CursorX:]
 		b.CursorX--
 	} else if b.CursorY > 0 {
-		// Si está al inicio de la línea, sube el texto y lo concatena a la línea de arriba
+
 		lineaActual := b.Lineas[b.CursorY]
 		b.CursorY--
 		b.CursorX = len(b.Lineas[b.CursorY])

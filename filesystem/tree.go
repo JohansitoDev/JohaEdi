@@ -44,7 +44,6 @@ func LeerDirectorio(rutaBase string) (*ArchivoNodo, error) {
 	return raiz, nil
 }
 
-// FormatearArbol modificado para quitar los íconos de carpetas y hojas
 func FormatearArbol(nodo *ArchivoNodo, prefijo string) []string {
 	var lineas []string
 	if nodo == nil {
