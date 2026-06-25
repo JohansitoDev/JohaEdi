@@ -13,68 +13,91 @@ func (e *Editor) draw() {
 	style := tcell.StyleDefault.Background(tcell.ColorBlack).Foreground(tcell.ColorGreen)
 	invStyle := tcell.StyleDefault.Background(tcell.ColorGreen).Foreground(tcell.ColorBlack)
 
-	// 1. DIBUJAR EXPLORADOR DE ARCHIVOS (Lateral izquierdo - 25 columnas)
+	mainH := h - e.terminalH - 2
 	sidebarW := 28
+
 	for y := 0; y < h-2; y++ {
 		e.screen.SetContent(sidebarW, y, '│', nil, style)
 	}
 
-	// Mostrar ruta actual recortada si es muy larga
 	dirTitle := fmt.Sprintf(" DIR: %s", filepath.Base(e.currentDir))
 	e.drawString(0, 0, dirTitle, invStyle)
 
 	for i, f := range e.files {
-		if i+1 >= h-2 {
+		if i+1 >= mainH {
 			break
 		}
 		itemStyle := style
 		if i == e.fileIndex {
-			itemStyle = invStyle // Resaltar seleccionado
+			itemStyle = invStyle
 		}
 		e.drawString(1, i+1, f, itemStyle)
 	}
 
-	// 2. DIBUJAR ÁREA PRINCIPAL
 	mainX := sidebarW + 2
-	if e.currentFile == "" {
-		// PANTALLA DE BIENVENIDA: Logo centralizado si no hay archivo abierto
-		logo := []string{
-			"   ║║║║║║║║║║║║║║║║║║║║║║║║║   ",
-			"   ║  ║║ ╔═══╗ ║  ║  ║ ╔═══╗ ║   ",
-			"   ║  ║║ ║   ║ ║══╣  ║ ║   ║ ║   ",
-			"   ╚══╝║ ╚═══╝ ╩  ╩══╝ ╚═══╝ ╩   ",
-			"      ═╩═ JOHAEDI EDITOR ═╩═     ",
-		}
-		centerY := h / 3
-		for idx, line := range logo {
-			centerX := mainX + ((w - mainX - len(line)) / 2)
-			e.drawString(centerX, centerY+idx, line, style)
+
+	if len(e.tabs) > 0 {
+		tabX := mainX
+		for idx, t := range e.tabs {
+			tabName := " " + t.Name + " "
+			tabStyle := style
+			if idx == e.activeTab {
+				tabStyle = invStyle
+			}
+			e.drawString(tabX, 0, tabName, tabStyle)
+			tabX += len(tabName) + 1
+			e.screen.SetContent(tabX-1, 0, '│', nil, style)
 		}
 
-		// Mostrar logs de comandos abajo si existen
-		if e.outputLog != "" {
-			e.drawString(mainX, h-4, "═══ Última Salida ═══", style)
-			e.drawString(mainX, h-3, e.outputLog, style)
-		}
-	} else {
-		// Mostrar contenido del archivo abierto
-		e.drawString(mainX, 0, fmt.Sprintf("📄 Leyendo: %s", filepath.Base(e.currentFile)), invStyle)
-		for idx, line := range e.fileContent {
-			if idx+2 >= h-2 {
+		active := e.tabs[e.activeTab]
+		for idx, line := range active.Content {
+			if idx+2 >= mainH {
 				break
 			}
 			e.drawString(mainX, idx+2, line, style)
 		}
+	} else {
+		logo := []string{
+			"██████  ██████  ██   ██  ██████  ███████ ██████  ██ ",
+			"    ██ ██    ██ ██   ██ ██    ██ ██      ██   ██ ██ ",
+			"    ██ ██    ██ ███████ ████████ █████   ██   ██ ██ ",
+			"██  ██ ██    ██ ██   ██ ██    ██ ██      ██   ██ ██ ",
+			" ████   ██████  ██   ██ ██    ██ ███████ ██████  ██ ",
+			"                                                    ",
+			"         ═╩═ JOHAEDI TERMINAL EDITOR ═╩═            ",
+		}
+		centerY := mainH / 3
+		for idx, line := range logo {
+			centerX := mainX + ((w - mainX - len(line)) / 2)
+			e.drawString(centerX, centerY+idx, line, style)
+		}
 	}
 
-	// 3. BARRA DE ESTADO INFERIOR
-	statusText := " [F1] Crear Carpeta | [F2] Comando Terminal | [Enter] Abrir/Entrar | [Esc/Ctrl+Q] Salir"
+	termY := mainH + 1
+	for x := 0; x < w; x++ {
+		e.screen.SetContent(x, termY, '─', nil, style)
+	}
+	e.drawString(2, termY, " [ PANEL DE EJECUCIÓN & LOGS ] ", invStyle)
+
+	logRow := termY + 1
+	startLog := 0
+	if len(e.outputLogs) > e.terminalH-1 {
+		startLog = len(e.outputLogs) - (e.terminalH - 1)
+	}
+	for i := startLog; i < len(e.outputLogs); i++ {
+		if logRow >= h-2 {
+			break
+		}
+		e.drawString(1, logRow, e.outputLogs[i], style)
+		logRow++
+	}
+
+	statusText := " [←/→] Navegar | [Tab] Cambiar Pestaña | [Ctrl+W] Cerrar Pestaña | [F2] Ejecutar Comando | [Esc] Salir"
 	if e.commandMode {
-		statusText = " MODO COMANDO: Escribe tu instrucción (Ej: git status / npm init) y presiona Enter"
+		statusText = " MODO COMANDO: Ejecuta tareas en background (Ej: go run . , npm run dev, git status)"
 	}
 	e.drawString(0, h-2, fmt.Sprintf("%-*s", w, statusText), invStyle)
 
-	// Línea de Comandos activa
 	if e.commandMode {
 		e.drawString(0, h-1, "> "+e.commandBuf, style)
 	} else {

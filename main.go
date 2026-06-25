@@ -8,16 +8,23 @@ import (
 	"github.com/gdamore/tcell/v2"
 )
 
+type Tab struct {
+	Name    string
+	Path    string
+	Content []string
+}
+
 type Editor struct {
 	screen      tcell.Screen
 	currentDir  string
 	files       []string
 	fileIndex   int
-	currentFile string
-	fileContent []string
+	tabs        []Tab
+	activeTab   int
 	commandMode bool
 	commandBuf  string
-	outputLog   string
+	outputLogs  []string
+	terminalH   int
 }
 
 func main() {
@@ -43,6 +50,9 @@ func main() {
 	e := &Editor{
 		screen:     s,
 		currentDir: desktopPath,
+		tabs:       []Tab{},
+		activeTab:  -1,
+		terminalH:  6,
 	}
 
 	e.updateFileList()

@@ -1,5 +1,15 @@
-# 🟢 JohaEdi — Minimalist CLI Code Editor
 
+```
+	         ██████  ██████  ██   ██  ██████  ███████ ██████  ██ 
+			     ██ ██    ██ ██   ██ ██    ██ ██      ██   ██ ██ 
+			     ██ ██    ██ ███████ ████████ █████   ██   ██ ██ 
+			 ██  ██ ██    ██ ██   ██ ██    ██ ██      ██   ██ ██ 
+			  ████   ██████  ██   ██ ██    ██ ███████ ██████  ██ 
+			                                                    
+			             JOHAEDI TERMINAL EDITOR             
+```
+
+#  JohaEdi — Minimalist CLI Code Editor
 ¡Bienvenido a **JohaEdi**! Soy Johan Mancebo y este es mi editor de código minimalista optimizado para la terminal de Windows. Diseñado desde cero en Go, enfocado en Blue Team operations, automatización ágil y desarrollo DevSecOps sin salir de la consola. Olvídate de los entornos pesados; esto es velocidad pura en texto verde flotante.
 
 ## 🚀 Características Principales
