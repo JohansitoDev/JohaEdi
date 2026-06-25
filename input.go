@@ -42,6 +42,10 @@ func (e *Editor) handleInput(ev *tcell.EventKey) bool {
 			fileName := strings.TrimPrefix(selected, "📄 ")
 			fullPath := filepath.Join(e.currentDir, fileName)
 			e.openFileInTab(fileName, fullPath)
+			e.editMode = true
+			e.cursorX = 0
+			e.cursorY = 0
+			e.textOffsetY = 0
 		}
 
 	case tcell.KeyLeft:
@@ -50,6 +54,9 @@ func (e *Editor) handleInput(ev *tcell.EventKey) bool {
 	case tcell.KeyTab:
 		if len(e.tabs) > 1 {
 			e.activeTab = (e.activeTab + 1) % len(e.tabs)
+			e.cursorX = 0
+			e.cursorY = 0
+			e.textOffsetY = 0
 		}
 
 	case tcell.KeyCtrlW:
@@ -58,6 +65,12 @@ func (e *Editor) handleInput(ev *tcell.EventKey) bool {
 			if e.activeTab >= len(e.tabs) {
 				e.activeTab = len(e.tabs) - 1
 			}
+			if len(e.tabs) == 0 {
+				e.editMode = false
+			}
+			e.cursorX = 0
+			e.cursorY = 0
+			e.textOffsetY = 0
 		}
 
 	case tcell.KeyF2:
@@ -65,6 +78,113 @@ func (e *Editor) handleInput(ev *tcell.EventKey) bool {
 		e.commandBuf = ""
 	}
 	return false
+}
+
+func (e *Editor) handleEditInput(ev *tcell.EventKey) {
+	if len(e.tabs) == 0 {
+		e.editMode = false
+		return
+	}
+
+	_, h := e.screen.Size()
+	mainH := h - e.terminalH - 2
+	maxLinesToDisplay := mainH - 2
+
+	active := &e.tabs[e.activeTab]
+
+	switch ev.Key() {
+	case tcell.KeyF1:
+		e.editMode = false
+
+	case tcell.KeyCtrlS:
+		fullContent := strings.Join(active.Content, "\n")
+		err := os.WriteFile(active.Path, []byte(fullContent), 0644)
+		if err == nil {
+			e.outputLogs = append(e.outputLogs, "💾 Archivo guardado: "+active.Name)
+		} else {
+			e.outputLogs = append(e.outputLogs, "❌ Error al guardar: "+err.Error())
+		}
+
+	case tcell.KeyUp:
+		if e.cursorY > 0 {
+			e.cursorY--
+			if e.cursorY < e.textOffsetY {
+				e.textOffsetY = e.cursorY
+			}
+			if e.cursorX > len(active.Content[e.cursorY]) {
+				e.cursorX = len(active.Content[e.cursorY])
+			}
+		}
+
+	case tcell.KeyDown:
+		if e.cursorY < len(active.Content)-1 {
+			e.cursorY++
+			if e.cursorY >= e.textOffsetY+maxLinesToDisplay {
+				e.textOffsetY++
+			}
+			if e.cursorX > len(active.Content[e.cursorY]) {
+				e.cursorX = len(active.Content[e.cursorY])
+			}
+		}
+
+	case tcell.KeyLeft:
+		if e.cursorX > 0 {
+			e.cursorX--
+		} else if e.cursorY > 0 {
+			e.cursorY--
+			if e.cursorY < e.textOffsetY {
+				e.textOffsetY = e.cursorY
+			}
+			e.cursorX = len(active.Content[e.cursorY])
+		}
+
+	case tcell.KeyRight:
+		if e.cursorX < len(active.Content[e.cursorY]) {
+			e.cursorX++
+		} else if e.cursorY < len(active.Content)-1 {
+			e.cursorY++
+			if e.cursorY >= e.textOffsetY+maxLinesToDisplay {
+				e.textOffsetY++
+			}
+			e.cursorX = 0
+		}
+
+	case tcell.KeyEnter:
+		currentLine := active.Content[e.cursorY]
+		leftPart := currentLine[:e.cursorX]
+		rightPart := currentLine[e.cursorX:]
+
+		active.Content[e.cursorY] = leftPart
+		active.Content = append(active.Content[:e.cursorY+1], append([]string{rightPart}, active.Content[e.cursorY+1:]...)...)
+		e.cursorY++
+
+		if e.cursorY >= e.textOffsetY+maxLinesToDisplay {
+			e.textOffsetY++
+		}
+		e.cursorX = 0
+
+	case tcell.KeyBackspace, tcell.KeyBackspace2:
+		if e.cursorX > 0 {
+			currentLine := active.Content[e.cursorY]
+			active.Content[e.cursorY] = currentLine[:e.cursorX-1] + currentLine[e.cursorX:]
+			e.cursorX--
+		} else if e.cursorY > 0 {
+			prevLineLen := len(active.Content[e.cursorY-1])
+			active.Content[e.cursorY-1] += active.Content[e.cursorY]
+			active.Content = append(active.Content[:e.cursorY], active.Content[e.cursorY+1:]...)
+			e.cursorY--
+
+			if e.cursorY < e.textOffsetY {
+				e.textOffsetY = e.cursorY
+			}
+			e.cursorX = prevLineLen
+		}
+
+	case tcell.KeyRune:
+		currentLine := active.Content[e.cursorY]
+		active.Content[e.cursorY] = currentLine[:e.cursorX] + string(ev.Rune())
+		e.cursorX++
+	}
 }
 
 func (e *Editor) triggerBack() {
@@ -86,7 +206,7 @@ func (e *Editor) openFileInTab(name, path string) {
 	if err == nil {
 		content = strings.Split(string(data), "\n")
 	} else {
-		content = []string{"Error al abrir el archivo."}
+		content = []string{""}
 	}
 
 	newTab := Tab{Name: name, Path: path, Content: content}

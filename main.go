@@ -25,6 +25,10 @@ type Editor struct {
 	commandBuf  string
 	outputLogs  []string
 	terminalH   int
+	editMode    bool
+	cursorX     int
+	cursorY     int
+	textOffsetY int
 }
 
 func main() {
@@ -48,11 +52,13 @@ func main() {
 	}
 
 	e := &Editor{
-		screen:     s,
-		currentDir: desktopPath,
-		tabs:       []Tab{},
-		activeTab:  -1,
-		terminalH:  6,
+		screen:      s,
+		currentDir:  desktopPath,
+		tabs:        []Tab{},
+		activeTab:   -1,
+		terminalH:   6,
+		editMode:    false,
+		textOffsetY: 0,
 	}
 
 	e.updateFileList()
@@ -67,6 +73,8 @@ func main() {
 		case *tcell.EventKey:
 			if e.commandMode {
 				e.handleCommandInput(ev)
+			} else if e.editMode {
+				e.handleEditInput(ev)
 			} else {
 				if e.handleInput(ev) {
 					e.screen.Fini()

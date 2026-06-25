@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"path/filepath"
+	"unicode/utf8"
 
 	"github.com/gdamore/tcell/v2"
 )
@@ -28,13 +29,14 @@ func (e *Editor) draw() {
 			break
 		}
 		itemStyle := style
-		if i == e.fileIndex {
+		if i == e.fileIndex && !e.editMode {
 			itemStyle = invStyle
 		}
 		e.drawString(1, i+1, f, itemStyle)
 	}
 
 	mainX := sidebarW + 2
+	maxLinesToDisplay := mainH - 2
 
 	if len(e.tabs) > 0 {
 		tabX := mainX
@@ -50,13 +52,23 @@ func (e *Editor) draw() {
 		}
 
 		active := e.tabs[e.activeTab]
-		for idx, line := range active.Content {
-			if idx+2 >= mainH {
+
+		for idx := 0; idx < maxLinesToDisplay; idx++ {
+			fileLineIdx := idx + e.textOffsetY
+			if fileLineIdx >= len(active.Content) {
 				break
 			}
-			e.drawString(mainX, idx+2, line, style)
+			e.drawString(mainX, idx+2, active.Content[fileLineIdx], style)
+		}
+
+		if e.editMode {
+			visualCursorY := e.cursorY - e.textOffsetY
+			e.screen.ShowCursor(mainX+e.cursorX, visualCursorY+2)
+		} else {
+			e.screen.HideCursor()
 		}
 	} else {
+		e.screen.HideCursor()
 		logo := []string{
 			"██████  ██████  ██   ██  ██████  ███████ ██████  ██ ",
 			"    ██ ██    ██ ██   ██ ██    ██ ██      ██   ██ ██ ",
@@ -68,7 +80,8 @@ func (e *Editor) draw() {
 		}
 		centerY := mainH / 3
 		for idx, line := range logo {
-			centerX := mainX + ((w - mainX - len(line)) / 2)
+			visualWidth := utf8.RuneCountInString(line)
+			centerX := mainX + ((w - mainX - visualWidth) / 2)
 			e.drawString(centerX, centerY+idx, line, style)
 		}
 	}
@@ -92,8 +105,10 @@ func (e *Editor) draw() {
 		logRow++
 	}
 
-	statusText := " [←/→] Navegar | [Tab] Cambiar Pestaña | [Ctrl+W] Cerrar Pestaña | [F2] Ejecutar Comando | [Esc] Salir"
-	if e.commandMode {
+	statusText := " [←/→] Moverse | [Tab] Cambiar Pestaña | [F2] Comando | [Enter] Editar | [Esc] Salir"
+	if e.editMode {
+		statusText = " MODO EDICIÓN: [Ctrl+S] Guardar Cambios | [F1] Volver al Explorador de Archivos"
+	} else if e.commandMode {
 		statusText = " MODO COMANDO: Ejecuta tareas en background (Ej: go run . , npm run dev, git status)"
 	}
 	e.drawString(0, h-2, fmt.Sprintf("%-*s", w, statusText), invStyle)
